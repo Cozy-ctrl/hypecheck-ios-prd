@@ -1,0 +1,454 @@
+openapi: 3.1.0
+info:
+  title: HypeCheck Backend API
+  version: 0.1.0
+  description: |
+    A normalized application API for the HypeCheck iOS client. The backend owns
+    SearchAPI credentials, source-specific request orchestration, data policy,
+    source attribution, matching confidence, caching, and rate limits.
+servers:
+  - url: https://api.example.com
+security:
+  - bearerAuth: []
+paths:
+  /v1/imports:
+    post:
+      summary: Start a URL import
+      operationId: createUrlImport
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sourceType, url]
+              properties:
+                sourceType:
+                  type: string
+                  enum: [tiktok, product_url]
+                url:
+                  type: string
+                  format: uri
+                locale:
+                  type: string
+                  example: en-US
+      responses:
+        '202':
+          description: Import accepted for analysis.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportJob'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+  /v1/imports/image:
+    post:
+      summary: Start a product image import
+      operationId: createImageImport
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [image]
+              properties:
+                image:
+                  type: string
+                  format: binary
+                locale:
+                  type: string
+                  example: en-US
+      responses:
+        '202':
+          description: Image import accepted for analysis.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportJob'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+  /v1/imports/{importId}:
+    get:
+      summary: Read import state and product candidates
+      operationId: getImport
+      parameters:
+        - $ref: '#/components/parameters/ImportId'
+      responses:
+        '200':
+          description: Current import state and candidates.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportJob'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /v1/imports/{importId}/confirm:
+    post:
+      summary: Confirm a product candidate and request card enrichment
+      operationId: confirmProductCandidate
+      parameters:
+        - $ref: '#/components/parameters/ImportId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [candidateId]
+              properties:
+                candidateId:
+                  type: string
+                selectedVariant:
+                  type: string
+                userQueryRefinement:
+                  type: string
+      responses:
+        '202':
+          description: Product confirmed; research card generation has begun.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResearchCardJob'
+        '409':
+          description: Candidate is no longer valid; client should refresh the import.
+  /v1/research-cards/{cardId}:
+    get:
+      summary: Read a normalized source-linked product research card
+      operationId: getResearchCard
+      parameters:
+        - $ref: '#/components/parameters/CardId'
+      responses:
+        '200':
+          description: Product research card.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResearchCard'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /v1/watchlist-items:
+    get:
+      summary: List the authenticated user's saved products
+      operationId: listWatchlistItems
+      responses:
+        '200':
+          description: Saved items.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WatchlistItem'
+    post:
+      summary: Save a user-confirmed product or research card
+      operationId: createWatchlistItem
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cardId]
+              properties:
+                cardId:
+                  type: string
+                note:
+                  type: string
+                  maxLength: 1000
+                targetPrice:
+                  type: number
+                  minimum: 0
+      responses:
+        '201':
+          description: Saved item.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WatchlistItem'
+  /v1/watchlist-items/{itemId}:
+    patch:
+      summary: Update a watchlist item
+      operationId: updateWatchlistItem
+      parameters:
+        - $ref: '#/components/parameters/WatchlistItemId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note:
+                  type: string
+                  maxLength: 1000
+                targetPrice:
+                  type: number
+                  minimum: 0
+      responses:
+        '200':
+          description: Updated item.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WatchlistItem'
+    delete:
+      summary: Delete a saved user item and its personal notes
+      operationId: deleteWatchlistItem
+      parameters:
+        - $ref: '#/components/parameters/WatchlistItemId'
+      responses:
+        '204':
+          description: Item deleted.
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    ImportId:
+      name: importId
+      in: path
+      required: true
+      schema:
+        type: string
+    CardId:
+      name: cardId
+      in: path
+      required: true
+      schema:
+        type: string
+    WatchlistItemId:
+      name: itemId
+      in: path
+      required: true
+      schema:
+        type: string
+  responses:
+    InvalidInput:
+      description: Input is invalid, unsupported, or disallowed by source policy.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Requested item was not found or is not available to the user.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    ImportJob:
+      type: object
+      required: [id, status, sourceType]
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [queued, analyzing, needs_confirmation, limited_data, failed, complete]
+        sourceType:
+          type: string
+          enum: [tiktok, product_url, image]
+        candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductCandidate'
+        sourceContext:
+          $ref: '#/components/schemas/SourceContext'
+        notices:
+          type: array
+          items:
+            type: string
+    ResearchCardJob:
+      type: object
+      required: [cardId, status]
+      properties:
+        cardId:
+          type: string
+        status:
+          type: string
+          enum: [queued, building, partial, complete, failed]
+        notices:
+          type: array
+          items:
+            type: string
+    ProductCandidate:
+      type: object
+      required: [id, title, confidence, confidenceLabel]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        brand:
+          type: string
+        variant:
+          type: string
+        imageUrl:
+          type: string
+          format: uri
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        confidenceLabel:
+          type: string
+          enum: [likely, possible, low]
+        matchReason:
+          type: string
+        sourceLinks:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceLink'
+    SourceContext:
+      type: object
+      properties:
+        originalUrl:
+          type: string
+          format: uri
+        creatorName:
+          type: string
+        sourceTitle:
+          type: string
+        mentions:
+          type: array
+          items:
+            $ref: '#/components/schemas/VideoMention'
+    VideoMention:
+      type: object
+      required: [text, startSeconds, endSeconds, confidence]
+      properties:
+        text:
+          type: string
+          maxLength: 280
+        startSeconds:
+          type: number
+          minimum: 0
+        endSeconds:
+          type: number
+          minimum: 0
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+    ResearchCard:
+      type: object
+      required: [id, product, generatedAt, disclosures]
+      properties:
+        id:
+          type: string
+        generatedAt:
+          type: string
+          format: date-time
+        product:
+          $ref: '#/components/schemas/ProductCandidate'
+        mentionContext:
+          type: array
+          items:
+            $ref: '#/components/schemas/VideoMention'
+        ownerThemes:
+          type: array
+          maxItems: 4
+          items:
+            $ref: '#/components/schemas/OwnerTheme'
+        offers:
+          type: array
+          items:
+            $ref: '#/components/schemas/Offer'
+        alternatives:
+          type: array
+          maxItems: 3
+          items:
+            $ref: '#/components/schemas/Alternative'
+        sourceLinks:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceLink'
+        disclosures:
+          type: array
+          items:
+            type: string
+    OwnerTheme:
+      type: object
+      required: [label, sourceCount, sourceLinks]
+      properties:
+        label:
+          type: string
+        sourceCount:
+          type: integer
+          minimum: 1
+        recencyLabel:
+          type: string
+        sourceLinks:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceLink'
+    Offer:
+      type: object
+      required: [merchantName, outboundUrl, fetchedAt]
+      properties:
+        merchantName:
+          type: string
+        displayedPrice:
+          type: string
+        shippingText:
+          type: string
+        availabilityText:
+          type: string
+        outboundUrl:
+          type: string
+          format: uri
+        fetchedAt:
+          type: string
+          format: date-time
+    Alternative:
+      type: object
+      required: [candidate, matchRationale]
+      properties:
+        candidate:
+          $ref: '#/components/schemas/ProductCandidate'
+        matchRationale:
+          type: string
+    WatchlistItem:
+      type: object
+      required: [id, cardId, createdAt]
+      properties:
+        id:
+          type: string
+        cardId:
+          type: string
+        note:
+          type: string
+        targetPrice:
+          type: number
+        createdAt:
+          type: string
+          format: date-time
+    SourceLink:
+      type: object
+      required: [label, url]
+      properties:
+        label:
+          type: string
+        url:
+          type: string
+          format: uri
+        sourceType:
+          type: string
+          enum: [creator, merchant, review, forum, video, product, other]
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        retryable:
+          type: boolean

@@ -1,0 +1,21 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Local artifacts
+.DS_Store
+*.log
+coverage/
+
+# iOS / Xcode build outputs
+DerivedData/
+build/
+*.xcuserstate
+xcuserdata/
+
+# Temporary imports and cached third-party content
+imports/
+cache/
